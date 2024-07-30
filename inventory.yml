@@ -1,4 +1,4 @@
-:wall:
+all:
   hosts:
     hng:
       ansible_host: 52.90.197.78
