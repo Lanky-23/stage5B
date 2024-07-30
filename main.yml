@@ -5,7 +5,6 @@
   vars:
     db_admin_user: "postgres"
     db_admin_password: "admin_password"
-    rabbitmq_password: "rabbitmq_password"
     boilerplate_name: "boilerplate_db"
     app_dir: /opt/stage_5b
     rabbitmq_password: guest
