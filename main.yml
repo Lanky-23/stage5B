@@ -1,5 +1,5 @@
 ---
-- name: Setup Stage 5b Environment
+- name: Hng Stage5b Task 
   hosts: hng
   become: yes
   vars:
@@ -26,183 +26,117 @@
     jwt_expiry_timeframe: 3600
 
   tasks:
-    - name: Install Node.js and npm
-      apt:
-        name:
-          - nodejs
-          - npm
-        state: present
-        update_cache: yes
-
-    - name: Create hng user with sudo privileges
-      ansible.builtin.user:
-        name: hng
-        state: present
-        shell: /bin/bash
+    # Create the hng user
+    - name: Create hng user
+      user:
+        name: "{{ app_user }}"
         groups: sudo
+        shell: /bin/bash
 
-    - name: Ensure /opt directory exists
-      ansible.builtin.file:
-        path: /opt
+    # Update the apt cache
+    - name: Update apt cache
+      apt: update_cache=yes
+
+    # Install Node.js
+    - name: Install Node.js
+      shell: |
+        curl -fsSL https://deb.nodesource.com/setup_14.x | sudo -E bash -
+        sudo apt-get install -y nodejs
+
+    # Install ACL
+    - name: Install ACL
+      apt:
+        name: acl
+        state: present
+      become: yes
+
+    # Check if the app directory exists and is not empty
+    - name: Check if app directory exists and is not empty
+      stat:
+        path: "{{ app_dir }}"
+      register: app_dir_stat
+
+    # Remove existing app directory if it exists and is not empty
+    - name: Remove existing app directory if it exists and is not empty
+      file:
+        path: "{{ app_dir }}"
+        state: absent
+      when: app_dir_stat.stat.exists and app_dir_stat.stat.size > 0
+      become: yes
+
+    # Ensure the app directory exists
+    - name: Ensure app directory exists
+      file:
+        path: "{{ app_dir }}"
         state: directory
+        mode: '0755'
+        owner: "{{ app_user }}"
+        group: "{{ app_user }}"
+      become: yes
 
-    - name: Change ownership of /opt directory
-      ansible.builtin.file:
-        path: /opt
-        state: directory
-        owner: hng
-        group: hng
-
-    - name: Create destination directory for cloning
-      ansible.builtin.file:
-        path: /opt/stage_5b
-        state: directory
-        owner: hng
-        group: hng
-
-    - name: Add /opt/stage_5b as a safe directory for Git
-      ansible.builtin.shell:
-        cmd: git config --global --add safe.directory /opt/stage_5b
-
-    - name: Clone the DevOps branch of the repository
-      ansible.builtin.git:
+    # Clone the repository
+    - name: Clone repository
+      become: yes
+      become_user: "{{ app_user }}"
+      git:
         repo: 'https://github.com/hngprojects/hng_boilerplate_nestjs.git'
-        dest: /opt/stage_5b
         version: devops
+        dest: "{{ app_dir }}"
         force: yes
 
-    - name: Install PostgreSQL
+    # Ensure the app_user owns the app directory
+    - name: Ensure app_user owns app directory
+      file:
+        path: "{{ app_dir }}"
+        owner: "{{ app_user }}"
+        group: "{{ app_user }}"
+        recurse: yes
+      become: yes
+
+    # Install base dependencies
+    - name: Install base dependencies
       apt:
-        name: postgresql
+        name: 
+          - git 
+          - npm
+          - postgresql
+          - ufw
         state: present
-        update_cache: yes
 
-    - name: Ensure PostgreSQL service is running
-      ansible.builtin.systemd:
-        name: postgresql
-        state: started
-        enabled: yes
-
-    - name: Save PostgreSQL admin password
-      ansible.builtin.copy:
-        dest: /var/secrets/pg_pw.txt
-        content: |
-          POSTGRES_PASSWORD={{ db_admin_password }}
-        mode: '0600'
-        owner: root
-        group: root
-
-    - name: Check if PostgreSQL database exists
-      ansible.builtin.shell:
-        cmd: sudo -u postgres psql -tAc "SELECT 1 FROM pg_database WHERE datname='{{ boilerplate_name }}'"
-      register: db_check
-      changed_when: false
-
-    - name: Create PostgreSQL database if not exists
-      ansible.builtin.shell:
-        cmd: sudo -u postgres psql -c "CREATE DATABASE {{ boilerplate_name }};"
-      when: db_check.stdout != '1'
-      register: db_creation
-
-    - name: Create PostgreSQL user if not exists
-      ansible.builtin.shell:
-        cmd: sudo -u postgres psql -c "CREATE USER {{ db_user }} WITH PASSWORD '{{ db_pass }}';"
-      when: db_check.stdout != '1'
-
-    - name: Grant permissions to PostgreSQL user
-      ansible.builtin.shell:
-        cmd: sudo -u postgres psql -c "GRANT ALL PRIVILEGES ON DATABASE {{ boilerplate_name }} TO {{ db_user }};"
-      when: db_check.stdout != '1'
-
-    - name: Debug database creation
-      ansible.builtin.debug:
-        msg: "Database {{ boilerplate_name }} was created."
-      when: db_check.stdout != '1' and db_creation.changed
-
-    - name: Debug existing database
-      ansible.builtin.debug:
-        msg: "Database {{ boilerplate_name }} already exists. Skipping creation."
-      when: db_check.stdout == '1'
-
-    - name: Install RabbitMQ
-      apt:
-        name: rabbitmq-server
-        state: present
-        update_cache: yes
-
-    - name: Set RabbitMQ default user and password
-      ansible.builtin.shell:
-        cmd: rabbitmqctl change_password guest {{ rabbitmq_password }}
-
+    # Add Nginx GPG key
     - name: Add Nginx GPG key
       apt_key:
         url: 'https://nginx.org/keys/nginx_signing.key'
         state: present
 
+    # Add Nginx official repository
     - name: Add Nginx official repository
       apt_repository:
         repo: 'deb http://nginx.org/packages/ubuntu/ {{ ansible_distribution_release | lower }} nginx'
         state: present
         filename: nginx
 
+    # Install Nginx 1.26
     - name: Install Nginx 1.26
       apt:
         name: nginx=1.26.*
-
         state: present
         update_cache: yes
         allow_downgrade: yes
 
-    - name: Remove default Nginx configuration
-      file:
-        path: /etc/nginx/conf.d/default.conf
-        state: absent
-      notify: Restart Nginx
+    # Install NestJS CLI globally
+    - name: Install NestJS CLI globally
+      npm:
+        name: '@nestjs/cli'
+        global: yes
 
-    - name: Configure Nginx
-      ansible.builtin.copy:
-        content: |
-          server {
-            listen 80;
-            server_name _;
-            location / {
-              proxy_pass http://127.0.0.1:3000;
-              proxy_set_header Host $host;
-              proxy_set_header X-Real-IP $remote_addr;
-              proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-              proxy_set_header X-Forwarded-Proto $scheme;
-            }
-          }
-        dest: /etc/nginx/conf.d/app.conf
-        owner: root
-        group: root
-        mode: '0644'
-        notify: Restart Nginx
+    # Install project dependencies
+    - name: Install project dependencies
+      npm:
+        path: "{{ app_dir }}"
+      become: yes
 
-    - name: Ensure /var/log/stage_5b directory exists
-      ansible.builtin.file:
-        path: /var/log/stage_5b
-        state: directory
-        owner: hng
-        group: hng
-        mode: '0755'
-
-    - name: Set up logging for stderr
-      ansible.builtin.file:
-        path: /var/log/stage_5b/error.log
-        state: touch
-        owner: hng
-        group: hng
-        mode: '0644'
-
-    - name: Set up logging for stdout
-      ansible.builtin.file:
-        path: /var/log/stage_5b/out.log
-        state: touch
-        owner: hng
-        group: hng
-        mode: '0644'
-
+    # Create .env file
     - name: Create .env file
       copy:
         content: |
@@ -226,51 +160,171 @@
         mode: '0600'
       notify: Restart application
 
-    - name: Change ownership of application directory
-      ansible.builtin.file:
-        path: "{{ app_dir }}"
+    # Configure PostgreSQL
+    - name: Configure PostgreSQL
+      become: yes
+      become_user: postgres
+      shell: |
+        psql -c "CREATE DATABASE {{ db_name }};"
+        psql -c "CREATE USER {{ db_user }} WITH ENCRYPTED PASSWORD '{{ db_password }}';"
+        psql -c "GRANT ALL PRIVILEGES ON DATABASE {{ db_name }} TO {{ db_user }};"
+        psql -d {{ db_name }} -c "GRANT USAGE ON SCHEMA public TO {{ db_user }};"
+        psql -d {{ db_name }} -c "GRANT CREATE ON SCHEMA public TO {{ db_user }};"
+        psql -d {{ db_name }} -c "ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON TABLES TO {{ db_user }};"
+      args:
+        executable: /bin/bash
+
+    # Create secrets directory
+    - name: Create secrets directory
+      file:
+        path: /var/secrets
+        state: directory
+        owner: root
+        group: root
+        mode: '0755'
+
+    # Save PostgreSQL credentials
+    - name: Save PostgreSQL credentials
+      copy:
+        content: "DB_USER={{ db_user }}\nDB_PASSWORD={{ db_password }}"
+        dest: /var/secrets/pg_pw.txt
+        mode: '0600'
+
+    # Install TypeORM globally
+    - name: Install TypeORM globally
+      npm:
+        name: typeorm
+        global: yes
+        state: present
+        
+    # Install RabbitMQ
+    - name: Install RabbitMQ
+      apt:
+        name: rabbitmq-server
+        state: present
+        update_cache: yes
+
+    # Set RabbitMQ default user and password
+    - name: Set RabbitMQ default user and password
+      ansible.builtin.shell:
+        cmd: rabbitmqctl change_password guest {{ rabbitmq_password }}
+
+    # Ensure RabbitMQ service is enabled and started
+    - name: Ensure RabbitMQ service is enabled and started
+      systemd:
+        name: rabbitmq-server
+        state: started
+        enabled: yes
+      become: yes
+
+    # Configure UFW
+    - name: Configure UFW
+      block:
+        - name: Reset UFW to default
+          ufw:
+            state: reset
+          become: yes
+
+        - name: Allow SSH (port 22)
+          ufw:
+            rule: allow
+            port: '22'
+          become: yes
+
+        - name: Allow HTTP (port 80)
+          ufw:
+            rule: allow
+            port: '80'
+          become: yes
+
+        - name: Deny access to port 3000
+          ufw:
+            rule: deny
+            port: '3000'
+          become: yes
+
+        - name: Enable UFW
+          ufw:
+            state: enabled
+          become: yes
+
+      rescue:
+        - name: UFW Status
+          command: ufw status
+          register: ufw_status
+          become: yes
+
+        - name: Display UFW Status
+          debug:
+            var: ufw_status.stdout_lines
+
+    # Remove default Nginx configuration
+    - name: Remove default Nginx configuration
+      file:
+        path: /etc/nginx/conf.d/default.conf
+        state: absent
+      notify: Restart Nginx
+
+    # Set up custom Nginx configuration
+    - name: Set up custom Nginx configuration
+      template:
+        src: nginx.conf.j2
+        dest: /etc/nginx/conf.d/app.conf
+        mode: '0644'
+        owner: root
+        group: root
+      notify: Restart Nginx
+
+    # Create log directory
+    - name: Create log directory
+      file:
+        path: "{{ log_dir }}"
         state: directory
         owner: "{{ app_user }}"
         group: "{{ app_user }}"
-   
+        mode: '0755'
 
-    - name: Install project dependencies
-      npm:
-        path: "{{ app_dir }}"
-      become: yes
+    # Create log files
+    - name: Create log files
+      file:
+        path: "{{ item }}"
+        state: touch
+        owner: "{{ app_user }}"
+        group: "{{ app_user }}"
+        mode: '0644'
+      loop:
+        - "{{ log_dir }}/error.log"
+        - "{{ log_dir }}/out.log"
 
+    # Build NestJS application
     - name: Build NestJS application
-      shell: npm run build
-      args:
-        chdir: "{{ app_dir }}"
-      become: yes
-      
+      shell: cd {{ app_dir }} && npm run build
+      become_user: "{{ app_user }}"
 
+    # Set up systemd service
     - name: Set up systemd service
       template:
         src: nestjs.service.j2
-        dest:  /etc/systemd/system/nestjs.service  
+        dest: /etc/systemd/system/nestjs.service
       notify: Restart application
 
-    - name: Test become_user
-      shell: |
-        touch /home/hng/testfile.txt
-        ls -l /home/hng/testfile.txt
-      become: yes
-      
-      register: testfile_result
-
-    - name: Debug test file creation
-      ansible.builtin.debug:
-        msg: "Test file created and permissions verified: {{ testfile_result.stdout }}"
-
   handlers:
-    - name: Restart application
-      systemd:
-        name: nestjs
-        state: restarted
-        enabled: yes
     - name: Restart Nginx
       systemd:
         name: nginx
         state: restarted
+
+    - name: Restart application
+      systemd:
+        name: nestjs
+        state: restarted
+        daemon_reload: yes
+
+    - name: Enable application service
+      systemd:
+        name: nestjs
+        enabled: yes
+
+        name: nestjs
+        enabled: yes
+        state: started
