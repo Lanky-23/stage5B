@@ -1,0 +1,16 @@
+[Unit]
+Description=NestJS Application
+After=network.target
+
+[Service]
+User=hng
+Group=hng
+WorkingDirectory=/opt/stage_5b
+ExecStart=/usr/bin/npm run start:dev
+Restart=always
+EnvironmentFile=/opt/stage_5b/.env
+StandardOutput=append:/var/log/stage_5b/out.log
+StandardError=append:/var/log/stage_5b/error.log
+
+[Install]
+WantedBy=multi-user.target
