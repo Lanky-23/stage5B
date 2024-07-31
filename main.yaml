@@ -3,35 +3,16 @@
   hosts: hng
   become: yes
 
-  vars:
-    app_dir: /opt/stage_5b
-    rabbitmq_password: guest
-    log_dir: /var/log/stage_5b
-    app_user: hng 
-    db_name: lanky
-    db_user: bala
-    db_password: Dongnaan13
-    profile: local
-    node_env: development
-    port: 3000
-    db_host: localhost
-    db_port: 5432
-    db_entities: "dist/src/modules/**/entities/**/*.entity{.ts,.js}"
-    db_migrations: "dist/**/migrations/*{.ts,.js}"
-    db_type: postgres
-    db_ssl: "false"
-    jwt_secret: someSecrets
-    jwt_expiry_timeframe: 3600
-
   tasks:
     - name: Create hng user
       user:
-        name: "{{ app_user }}"
+        name: hng
         groups: sudo
         shell: /bin/bash
 
     - name: Update apt cache
-      apt: update_cache=yes
+      apt: 
+        update_cache: yes
     
     - name: Install Node.js
       shell: |
@@ -42,45 +23,41 @@
       apt:
         name: acl
         state: present
-      become: yes
 
     - name: Check if app directory exists and is not empty
       stat:
-        path: "{{ app_dir }}"
+        path: /opt/stage_5b
       register: app_dir_stat
 
     - name: Remove existing app directory if it exists and is not empty
       file:
-        path: "{{ app_dir }}"
+        path: /opt/stage_5b
         state: absent
       when: app_dir_stat.stat.exists and app_dir_stat.stat.size > 0
-      become: yes
 
     - name: Ensure app directory exists
       file:
-        path: "{{ app_dir }}"
+        path: /opt/stage_5b
         state: directory
         mode: '0755'
-        owner: "{{ app_user }}"
-        group: "{{ app_user }}"
-      become: yes
+        owner: hng
+        group: hng
 
     - name: Clone repository
       become: yes
-      become_user: "{{ app_user }}"
+      become_user: hng
       git:
         repo: 'https://github.com/hngprojects/hng_boilerplate_nestjs.git'
         version: devops
-        dest: "{{ app_dir }}"
+        dest: /opt/stage_5b
         force: yes
 
-    - name: Ensure app_user owns app directory
+    - name: Ensure hng owns app directory
       file:
-        path: "{{ app_dir }}"
-        owner: "{{ app_user }}"
-        group: "{{ app_user }}"
+        path: /opt/stage_5b
+        owner: hng
+        group: hng
         recurse: yes
-      become: yes
 
     - name: Install base dependencies
       apt:
@@ -116,29 +93,29 @@
 
     - name: Install project dependencies
       npm:
-        path: "{{ app_dir }}"
+        path: /opt/stage_5b
       become: yes
 
     - name: Create .env file
       copy:
         content: |
-          PROFILE={{ profile }}
-          NODE_ENV={{ node_env }}
-          PORT={{ port }}
-          DB_USERNAME={{ db_user }}
-          DB_PASSWORD={{ db_password }}
-          DB_DATABASE={{ db_name }}
-          DB_HOST={{ db_host }}
-          DB_PORT={{ db_port }}
-          DB_ENTITIES={{ db_entities }}
-          DB_MIGRATIONS={{ db_migrations }}
-          DB_TYPE={{ db_type }}
-          DB_SSL={{ db_ssl }}
-          JWT_SECRET={{ jwt_secret }}
-          JWT_EXPIRY_TIMEFRAME={{ jwt_expiry_timeframe }}
-        dest: "{{ app_dir }}/.env"
-        owner: "{{ app_user }}"
-        group: "{{ app_user }}"
+          PROFILE=local
+          NODE_ENV=development
+          PORT=3000
+          DB_USERNAME=bala
+          DB_PASSWORD=Dongnaan13
+          DB_DATABASE=lanky
+          DB_HOST=localhost
+          DB_PORT=5432
+          DB_ENTITIES="dist/src/modules/**/entities/**/*.entity{.ts,.js}"
+          DB_MIGRATIONS="dist/**/migrations/*{.ts,.js}"
+          DB_TYPE=postgres
+          DB_SSL="false"
+          JWT_SECRET=someSecrets
+          JWT_EXPIRY_TIMEFRAME=3600
+        dest: /opt/stage_5b/.env
+        owner: hng
+        group: hng
         mode: '0600'
       notify: Restart application
 
@@ -146,12 +123,12 @@
       become: yes
       become_user: postgres
       shell: |
-        psql -c "CREATE DATABASE {{ db_name }};"
-        psql -c "CREATE USER {{ db_user }} WITH ENCRYPTED PASSWORD '{{ db_password }}';"
-        psql -c "GRANT ALL PRIVILEGES ON DATABASE {{ db_name }} TO {{ db_user }};"
-        psql -d {{ db_name }} -c "GRANT USAGE ON SCHEMA public TO {{ db_user }};"
-        psql -d {{ db_name }} -c "GRANT CREATE ON SCHEMA public TO {{ db_user }};"
-        psql -d {{ db_name }} -c "ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON TABLES TO {{ db_user }};"
+        psql -c "CREATE DATABASE lanky;"
+        psql -c "CREATE USER bala WITH ENCRYPTED PASSWORD 'Dongnaan13';"
+        psql -c "GRANT ALL PRIVILEGES ON DATABASE lanky TO bala;"
+        psql -d lanky -c "GRANT USAGE ON SCHEMA public TO bala;"
+        psql -d lanky -c "GRANT CREATE ON SCHEMA public TO bala;"
+        psql -d lanky -c "ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON TABLES TO bala;"
       args:
         executable: /bin/bash
 
@@ -165,7 +142,7 @@
 
     - name: Save PostgreSQL credentials
       copy:
-        content: "DB_USER={{ db_user }}\nDB_PASSWORD={{ db_password }}"
+        content: "DB_USER=bala\nDB_PASSWORD=Dongnaan13"
         dest: /var/secrets/pg_pw.txt
         mode: '0600'
 
@@ -182,51 +159,44 @@
         update_cache: yes
 
     - name: Set RabbitMQ default user and password
-      ansible.builtin.shell:
-        cmd: rabbitmqctl change_password guest {{ rabbitmq_password }}
+      shell:
+        cmd: rabbitmqctl change_password guest guest
 
     - name: Ensure RabbitMQ service is enabled and started
       systemd:
         name: rabbitmq-server
         state: started
         enabled: yes
-      become: yes
 
     - name: Configure UFW
       block:
         - name: Reset UFW to default
           ufw:
             state: reset
-          become: yes
 
         - name: Allow SSH (port 22)
           ufw:
             rule: allow
             port: '22'
-          become: yes
 
         - name: Allow HTTP (port 80)
           ufw:
             rule: allow
             port: '80'
-          become: yes
 
         - name: Deny access to port 3000
           ufw:
             rule: deny
             port: '3000'
-          become: yes
 
         - name: Enable UFW
           ufw:
             state: enabled
-          become: yes
 
       rescue:
         - name: UFW Status
           command: ufw status
           register: ufw_status
-          become: yes
 
         - name: Display UFW Status
           debug:
@@ -249,26 +219,26 @@
 
     - name: Create log directory
       file:
-        path: "{{ log_dir }}"
+        path: /var/log/stage_5b
         state: directory
-        owner: "{{ app_user }}"
-        group: "{{ app_user }}"
+        owner: hng
+        group: hng
         mode: '0755'
 
     - name: Create log files
       file:
         path: "{{ item }}"
         state: touch
-        owner: "{{ app_user }}"
-        group: "{{ app_user }}"
+        owner: hng
+        group: hng
         mode: '0644'
       loop:
-        - "{{ log_dir }}/error.log"
-        - "{{ log_dir }}/out.log"
+        - /var/log/stage_5b/error.log
+        - /var/log/stage_5b/out.log
 
     - name: Build NestJS application
-      shell: cd {{ app_dir }} && npm run build
-      become_user: "{{ app_user }}"
+      shell: cd /opt/stage_5b && npm run build
+      become_user: hng
 
     - name: Set up systemd service
       template:
