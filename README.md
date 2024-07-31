@@ -1,9 +1,8 @@
 # NestJS Boilerplate Deployment with Ansible
 
-This project provides an Ansible playbook for deploying a NestJS boilerplate application with PostgreSQL, RabbitMQ, and Nginx.
+This repository provides an Ansible playbook to automate the deployment of a NestJS boilerplate application. It includes the setup for Node.js, PostgreSQL, RabbitMQ, Nginx, and configuration of the application environment.
 
 ## Prerequisites
-
 - Ansible installed on the control machine
 - SSH access to the target host(s)
 - Git installed on the control machine
@@ -57,3 +56,30 @@ ansible-playbook main.yml -i inventory.yml -v
 - Configuration
 - Variables in main.yml:
 
+### Usage
+Edit the Inventory File: Update the inventory file (hosts) with your server details.
+Run the Playbook: Execute the playbook using the following command:
+```
+ansible-playbook -i hosts deploy_nestjs_boilerplate.yml
+```
+Verify Deployment: After running the playbook, verify the following:
+
+- The NestJS application is running and accessible through Nginx.
+- PostgreSQL and RabbitMQ are configured properly.
+- Logs are being generated as expected in the /var/log/stage_5b directory.
+  
+### Configuration
+You may need to adjust the following variables in the playbook to fit your environment:
+
+- app_dir: Directory where the application will be deployed.
+- rabbitmq_password: Password for RabbitMQ default user.
+- log_dir: Directory for application logs.
+- app_user: User under which the application will run.
+- db_name, db_user, db_password: PostgreSQL database credentials.
+- profile, node_env, port: Application environment settings.
+- db_host, db_port, db_entities, db_migrations, db_type, db_ssl: Database - connection settings.
+- jwt_secret, jwt_expiry_timeframe: JWT settings.
+
+### Troubleshooting
+- Permissions Issues: Ensure the hng user has appropriate permissions for the application directory and log files.
+- Service Failures: Check the status of services (Nginx, RabbitMQ, etc.) using systemctl status <service>.
